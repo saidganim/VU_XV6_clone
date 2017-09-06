@@ -83,12 +83,9 @@ static void *boot_alloc(uint32_t n)
         nextfree = ROUNDUP((char *) end, PGSIZE);
     }
 
-    /* Allocate a chunk large enough to hold 'n' bytes, then update nextfree.
-     * Make sure nextfree is kept aligned to a multiple of PGSIZE.
-     *
-     * LAB 1: Your code here.
-     */
-    return NULL;
+		result = nextfree;
+		nextfree = (char*) ROUNDUP((unsigned int)nextfree + n, PGSIZE);
+    return result;
 }
 
 /*
@@ -109,8 +106,6 @@ void mem_init(void)
     /* Find out how much memory the machine has (npages & npages_basemem). */
     i386_detect_memory();
 
-    /* Remove this line when you're ready to test this function. */
-    panic("mem_init: This function is not finished\n");
 
     /*********************************************************************
      * Allocate an array of npages 'struct page_info's and store it in 'pages'.
@@ -118,7 +113,7 @@ void mem_init(void)
      * physical page, there is a corresponding struct page_info in this array.
      * 'npages' is the number of physical pages in memory.  Your code goes here.
      */
-
+		 pages = boot_alloc(npages  * sizeof(struct page_info));
 
     /*********************************************************************
      * Now that we've allocated the initial kernel data structures, we set
@@ -166,37 +161,50 @@ void page_init(void)
      * NB: DO NOT actually touch the physical memory corresponding to free
      *     pages! */
     size_t i;
-    for (i = 0; i < npages; i++) {
-        pages[i].pp_ref = 0;
+		extern char end[];
+		pages[0].pp_ref = 1;
+    for (i = 1; i < npages; i++) {
+			if(
+				(i >= npages_basemem && i < (npages_basemem + PGNUM(EXTPHYSMEM - IOPHYSMEM))) || // [IOPHYSMEM, EXTPHYSMEM) AREA
+				(i >= PGNUM(0x100000) && i < PGNUM(end - KERNBASE) + PGNUM(sizeof(struct page_info) * npages)) // KERNEL AREA
+			){
+				cprintf("%d\n",PGNUM(0x100000));
+				pages[i].pp_ref = 1;
+			} else{
+				// [EXTPHYSMEM, ...) AREA
+				pages[i].pp_ref = 0;
         pages[i].pp_link = page_free_list;
         page_free_list = &pages[i];
+			}
     }
 }
 
 /*
- * Allocates a physical page.  
+ * Allocates a physical page.
  * If (alloc_flags & ALLOC_ZERO), fills the entire
  * returned physical page with '\0' bytes.  Does NOT increment the reference
  * count of the page - the caller must do these if necessary (either explicitly
  * or via page_insert).
- * If (alloc_flags & ALLOC_PREMAPPED), returns a physical page from the 
+ * If (alloc_flags & ALLOC_PREMAPPED), returns a physical page from the
  * initial pool of mapped pages.
- * 
+ *
  * Be sure to set the pp_link field of the allocated page to NULL so
  * page_free can check for double-free bugs.
  *
  * Returns NULL if out of free memory.
  *
  * Hint: use page2kva and memset
- * 
+ *
  * 4MB huge pages:
  * Come back later to extend this function to support 4MB huge page allocation.
  * If (alloc_flags & ALLOC_HUGE), returns a huge physical page of 4MB size.
  */
 struct page_info *page_alloc(int alloc_flags)
 {
-    /* Fill this function in */
-    return 0;
+    struct page_info *result = page_free_list;
+		page_free_list = page_free_list->pp_link;
+		++result->pp_ref;
+    return result;
 }
 
 /*
@@ -205,9 +213,11 @@ struct page_info *page_alloc(int alloc_flags)
  */
 void page_free(struct page_info *pp)
 {
-    /* Fill this function in
-     * Hint: You may want to panic if pp->pp_ref is nonzero or
-     * pp->pp_link is not NULL. */
+	--pp->pp_ref;
+	if(pp->pp_ref == 0){
+		pp->pp_link = page_free_list;
+	  page_free_list = pp;
+	}
 }
 
 /*
@@ -364,7 +374,7 @@ static void check_page_alloc(void)
     assert(nfree == 0);
 
     cprintf("[4K] check_page_alloc() succeeded!\n");
-   
+
     /* test allocation of huge page */
     pp0 = pp1 = php0 = 0;
     assert((pp0 = page_alloc(0)));
@@ -405,4 +415,3 @@ static void check_page_alloc(void)
 
     cprintf("[4M] check_page_alloc() succeeded!\n");
 }
-
