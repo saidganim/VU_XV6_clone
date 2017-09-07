@@ -143,39 +143,24 @@ void mem_init(void)
  */
 void page_init(void)
 {
-    /*
-     * The example code here marks all physical pages as free.
-     * However this is not truly the case.  What memory is free?
-     *  1) Mark physical page 0 as in use.
-     *     This way we preserve the real-mode IDT and BIOS structures in case we
-     *     ever need them.  (Currently we don't, but...)
-     *  2) The rest of base memory, [PGSIZE, npages_basemem * PGSIZE) is free.
-     *  3) Then comes the IO hole [IOPHYSMEM, EXTPHYSMEM), which must never be
-     *     allocated.
-     *  4) Then extended memory [EXTPHYSMEM, ...).
-     *     Some of it is in use, some is free. Where is the kernel in physical
-     *     memory?  Which pages are already in use for page tables and other
-     *     data structures?
-     *
-     * Change the code to reflect this.
-     * NB: DO NOT actually touch the physical memory corresponding to free
-     *     pages! */
     size_t i;
+		short int in_io_hole;
+		short int in_kern_area;
 		extern char end[];
 		pages[0].pp_ref = 1;
     for (i = 1; i < npages; i++) {
-			if(
-				(i >= npages_basemem && i < (npages_basemem + PGNUM(EXTPHYSMEM - IOPHYSMEM))) || // [IOPHYSMEM, EXTPHYSMEM) AREA
-				(i >= PGNUM(0x100000) && i < PGNUM(end - KERNBASE) + PGNUM(sizeof(struct page_info) * npages)) // KERNEL AREA
-			){
-				cprintf("%d\n",PGNUM(0x100000));
+			in_io_hole = (i >= PGNUM(IOPHYSMEM) && i < PGNUM(EXTPHYSMEM));
+			in_kern_area = (i >= PGNUM(EXTPHYSMEM)) && i < (PGNUM(boot_alloc(0) - KERNBASE));
+
+			if( in_io_hole || in_kern_area){
 				pages[i].pp_ref = 1;
-			} else{
+			} else {
 				// [EXTPHYSMEM, ...) AREA
 				pages[i].pp_ref = 0;
         pages[i].pp_link = page_free_list;
         page_free_list = &pages[i];
 			}
+
     }
 }
 
@@ -202,9 +187,13 @@ void page_init(void)
 struct page_info *page_alloc(int alloc_flags)
 {
     struct page_info *result = page_free_list;
-		page_free_list = page_free_list->pp_link;
-		++result->pp_ref;
-    return result;
+		if(alloc_flags && ALLOC_HUGE){
+			for(int i = 0 ; i < 1024; ++i)page_free_list = page_free_list->pp_link;
+		} else{
+			page_free_list = page_free_list->pp_link;
+			result->pp_link = NULL;
+		}
+		return result;
 }
 
 /*
@@ -213,11 +202,8 @@ struct page_info *page_alloc(int alloc_flags)
  */
 void page_free(struct page_info *pp)
 {
-	--pp->pp_ref;
-	if(pp->pp_ref == 0){
 		pp->pp_link = page_free_list;
 	  page_free_list = pp;
-	}
 }
 
 /*
