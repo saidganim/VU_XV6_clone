@@ -165,10 +165,10 @@ void page_init(void)
 
 void occupy_huge_page(struct page_info *pp){
 	struct page_info **tmp = &page_free_list;
-	pp->flags &= PG_BUSY;
-	pp->flags &= PG_HUGE;
+	pp->flags |= PG_BUSY;
+	pp->flags |= PG_HUGE;
 	while(*tmp){
-		cprintf(" item %p\n", (*tmp)->pp_link);
+		//cprintf(" item %p\n", (*tmp)->pp_link);
 		if((*tmp) == pp){
 			*tmp = (*tmp)->pp_link;
 			break;
@@ -209,7 +209,7 @@ struct page_info *page_alloc(int alloc_flags)
 			for(i = 0 ; i < npages; ++i){
 				j = 0;
 				if(!(pages[i].flags & PG_BUSY)){
-					cprintf("SEARCHING ::: %d\n", i);
+					//cprintf("SEARCHING ::: %d\n", i);
 					for(; j < 1024; ++j)
 						if(pages[i + j].flags & PG_BUSY){--j; break;}
 					if(j == 1024){
