@@ -141,43 +141,33 @@ void mem_init(void)
  * allocator functions below to allocate and deallocate physical
  * memory via the page_free_list.
  */
-void page_init(void)
-{
-    /*
-     * The example code here marks all physical pages as free.
-     * However this is not truly the case.  What memory is free?
-     *  1) Mark physical page 0 as in use.
-     *     This way we preserve the real-mode IDT and BIOS structures in case we
-     *     ever need them.  (Currently we don't, but...)
-     *  2) The rest of base memory, [PGSIZE, npages_basemem * PGSIZE) is free.
-     *  3) Then comes the IO hole [IOPHYSMEM, EXTPHYSMEM), which must never be
-     *     allocated.
-     *  4) Then extended memory [EXTPHYSMEM, ...).
-     *     Some of it is in use, some is free. Where is the kernel in physical
-     *     memory?  Which pages are already in use for page tables and other
-     *     data structures?
-     *
-     * Change the code to reflect this.
-     * NB: DO NOT actually touch the physical memory corresponding to free
-     *     pages! */
+ void page_init(void)
+ {
     size_t i;
-		extern char end[];
-		pages[0].pp_ref = 1;
+         short int io_hole;
+         short int kern_area;
+         extern char end[];
+         pages[0].pp_ref = 1;
     for (i = 1; i < npages; i++) {
-			if(
-				(i >= npages_basemem && i < (npages_basemem + PGNUM(EXTPHYSMEM - IOPHYSMEM))) || // [IOPHYSMEM, EXTPHYSMEM) AREA
-				(i >= PGNUM(0x100000) && i < PGNUM(end - KERNBASE) + PGNUM(sizeof(struct page_info) * npages)) // KERNEL AREA
-			){
-				cprintf("%d\n",PGNUM(0x100000));
-				pages[i].pp_ref = 1;
-			} else{
-				// [EXTPHYSMEM, ...) AREA
-				pages[i].pp_ref = 0;
+             io_hole = i >= (npages_basemem - PGNUM(EXTPHYSMEM - IOPHYSMEM)) && (i < npages_basemem);
+             kern_area = (i >= PGNUM(EXTPHYSMEM)) && i < PGNUM(boot_alloc(0) - KERNBASE);
+             if( io_hole )
+             {
+                pages[i].pp_ref = 1;
+                cprintf("io_hole\n");
+             }
+             if( kern_area )
+             {
+                 cprintf("kern_area\n");
+                 pages[i].pp_ref = 1;
+             } else{
+                 // [EXTPHYSMEM, ...) AREA
+                 pages[i].pp_ref = 0;
         pages[i].pp_link = page_free_list;
         page_free_list = &pages[i];
-			}
+             }
     }
-}
+ }
 
 /*
  * Allocates a physical page.
@@ -201,10 +191,47 @@ void page_init(void)
  */
 struct page_info *page_alloc(int alloc_flags)
 {
-    struct page_info *result = page_free_list;
-		page_free_list = page_free_list->pp_link;
-		++result->pp_ref;
-    return result;
+    if(alloc_flags && ALLOC_HUGE)
+    {
+      struct page_info *result_huge = page_free_list; //starting address
+      struct page_info *curr_page;                    //temporary page for the loop
+
+      size_t pages_num = PGNUM(0x100000 << 2);
+
+      for(size_t i = 0; i < pages_num; i++)
+      {
+        if(page_free_list != NULL) //if page_free_list is not empty, go on
+        {
+          curr_page = page_free_list;
+          ++(curr_page->pp_ref);
+          curr_page->is_huge = 1;
+          //Keep link between pages for dealloc
+
+      		page_free_list = page_free_list->pp_link;
+        }
+        else
+        {
+          return NULL; //not enough free pages available
+        }
+      }
+      return result_huge;
+    }
+    else if(page_free_list != NULL)
+    {
+      struct page_info *result = page_free_list;
+
+      result->pp_link = NULL;
+      ++result->pp_ref;
+      result->is_huge = 0;
+
+  		page_free_list = page_free_list->pp_link;
+      return result;
+    }
+    else
+    {
+        return NULL;
+    }
+
 }
 
 /*
@@ -213,11 +240,26 @@ struct page_info *page_alloc(int alloc_flags)
  */
 void page_free(struct page_info *pp)
 {
-	--pp->pp_ref;
-	if(pp->pp_ref == 0){
-		pp->pp_link = page_free_list;
-	  page_free_list = pp;
-	}
+  if(pp->is_huge)
+  {
+    size_t pages_num = PGNUM(0x100000 << 2);
+
+    for(size_t i = 0; i < pages_num; i++)
+    {
+        --pp->pp_ref;
+        page_free_list = pp;
+        pp = pp->pp_link:
+        pp->is_huge = 0;
+    }
+  }
+  else
+  {
+     --pp->pp_ref;
+  	 pp->pp_link = page_free_list;
+  	 page_free_list = pp;
+
+  }
+
 }
 
 /*
