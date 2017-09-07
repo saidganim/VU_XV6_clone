@@ -147,6 +147,7 @@ void page_init(void)
 		short int in_io_hole;
 		short int in_kern_area;
 		extern char end[];
+		page_free_list = 0;
 		pages[0].pp_ref = 1;
     for (i = 1; i < npages; i++) {
 			in_io_hole = (i >= PGNUM(IOPHYSMEM) && i < PGNUM(EXTPHYSMEM));
@@ -156,7 +157,6 @@ void page_init(void)
 				pages[i].pp_ref = 1;
 			} else {
 				// [EXTPHYSMEM, ...) AREA
-				pages[i].pp_ref = 0;
         pages[i].pp_link = page_free_list;
         page_free_list = &pages[i];
 			}
@@ -187,11 +187,21 @@ void page_init(void)
 struct page_info *page_alloc(int alloc_flags)
 {
     struct page_info *result = page_free_list;
-		if(alloc_flags && ALLOC_HUGE){
+		cprintf("ALLLLLLOOOOOCCCCC %p\n", result, alloc_flags);
+		if(!page_free_list)
+			return 0;
+		if(0 && alloc_flags && ALLOC_HUGE){
 			for(int i = 0 ; i < 1024; ++i)page_free_list = page_free_list->pp_link;
 		} else{
-			page_free_list = page_free_list->pp_link;
-			result->pp_link = NULL;
+				page_free_list = page_free_list->pp_link;
+				result->pp_link = NULL;
+				cprintf("ZEROE FLAG %d :::::::::: FLAG=%d\n", alloc_flags && ALLOC_ZERO, alloc_flags);
+				if(alloc_flags == ALLOC_ZERO){
+					cprintf("ZEROED::: %p, :: \n", result, alloc_flags);
+					memset((void*)page2kva(result), 0, PGSIZE);
+				}
+
+			cprintf("PAGE ALLOCATED %p, now head is %p\n", result, page_free_list);
 		}
 		return result;
 }
@@ -202,6 +212,7 @@ struct page_info *page_alloc(int alloc_flags)
  */
 void page_free(struct page_info *pp)
 {
+cprintf("PAGE FREE %p, now head is %p \n", page_free_list, pp);
 		pp->pp_link = page_free_list;
 	  page_free_list = pp;
 }
