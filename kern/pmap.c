@@ -148,13 +148,12 @@ void page_init(void)
 		short int in_kern_area;
 		extern char end[];
 		page_free_list = 0;
-		pages[0].pp_ref = 1;
+		pages[0].flags = PG_BUSY;
     for (i = 1; i < npages; i++) {
 			in_io_hole = (i >= PGNUM(IOPHYSMEM) && i < PGNUM(EXTPHYSMEM));
 			in_kern_area = (i >= PGNUM(EXTPHYSMEM)) && i < (PGNUM(boot_alloc(0) - KERNBASE));
-
 			if( in_io_hole || in_kern_area){
-				pages[i].pp_ref = 1;
+				pages[i].flags = PG_BUSY;
 			} else {
 				// [EXTPHYSMEM, ...) AREA
         pages[i].pp_link = page_free_list;
@@ -162,6 +161,21 @@ void page_init(void)
 			}
 
     }
+}
+
+void occupy_huge_page(struct page_info *pp){
+	struct page_info **tmp = &page_free_list;
+	pp->flags &= PG_BUSY;
+	pp->flags &= PG_HUGE;
+	while(*tmp){
+		cprintf(" item %p\n", (*tmp)->pp_link);
+		if((*tmp) == pp){
+			*tmp = (*tmp)->pp_link;
+			break;
+		}
+		tmp = &((*tmp)->pp_link);
+
+	}
 }
 
 /*
@@ -186,24 +200,41 @@ void page_init(void)
  */
 struct page_info *page_alloc(int alloc_flags)
 {
-    struct page_info *result = page_free_list;
-		cprintf("ALLLLLLOOOOOCCCCC %p\n", result, alloc_flags);
+    struct page_info *result = NULL;
 		if(!page_free_list)
 			return 0;
-		if(0 && alloc_flags && ALLOC_HUGE){
-			for(int i = 0 ; i < 1024; ++i)page_free_list = page_free_list->pp_link;
+		if(alloc_flags & ALLOC_HUGE){
+			struct page_info *pp;
+			int i = 0, j = 0;
+			for(i = 0 ; i < npages; ++i){
+				j = 0;
+				if(!(pages[i].flags & PG_BUSY)){
+					cprintf("SEARCHING ::: %d\n", i);
+					for(; j < 1024; ++j)
+						if(pages[i + j].flags & PG_BUSY){--j; break;}
+					if(j == 1024){
+						for(j = 0; j < 1024; ++j){
+							occupy_huge_page(&pages[i + j]);
+						}
+					}
+				}
+				if(j == 1024)
+					break;
+			}
+			if(i == 1024)
+				return NULL;
+			result = &pages[i];
+
 		} else{
+				result = page_free_list;
 				page_free_list = page_free_list->pp_link;
 				result->pp_link = NULL;
-				cprintf("ZEROE FLAG %d :::::::::: FLAG=%d\n", alloc_flags && ALLOC_ZERO, alloc_flags);
-				if(alloc_flags == ALLOC_ZERO){
-					cprintf("ZEROED::: %p, :: \n", result, alloc_flags);
+				if(alloc_flags & ALLOC_ZERO){
 					memset((void*)page2kva(result), 0, PGSIZE);
 				}
-
-			cprintf("PAGE ALLOCATED %p, now head is %p\n", result, page_free_list);
 		}
 		return result;
+
 }
 
 /*
@@ -212,9 +243,19 @@ struct page_info *page_alloc(int alloc_flags)
  */
 void page_free(struct page_info *pp)
 {
-cprintf("PAGE FREE %p, now head is %p \n", page_free_list, pp);
+	if(pp->flags & PG_HUGE){
+		for(int i = 0; i < 1024; ++i){
+			pp->pp_link = page_free_list;
+			pp->flags = 0x0;
+			page_free_list = pp;
+		}
+
+
+	} else{
 		pp->pp_link = page_free_list;
+		pp->flags = 0x0;
 	  page_free_list = pp;
+	}
 }
 
 /*
@@ -394,6 +435,7 @@ static void check_page_alloc(void)
     assert((php1 = page_alloc(ALLOC_HUGE)));
 
     /* Is the inter-huge-page difference right? */
+		cprintf("AAAAAAAAAAA %p ::: %p", page2pa(php0), page2pa(php1));
     if (page2pa(php1) > page2pa(php0)) {
         assert(page2pa(php1) - page2pa(php0) >= 1024*PGSIZE);
     } else {

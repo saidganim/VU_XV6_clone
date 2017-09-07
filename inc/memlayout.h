@@ -182,6 +182,13 @@ struct page_info {
      * boot_alloc do not have valid reference count fields. */
 
     uint16_t pp_ref;
+		// BUSY, HUGE_PAGE ...
+		char flags;
+};
+
+enum {
+	PG_BUSY = 1 << 0,
+	PG_HUGE = 1 << 1,
 };
 
 #endif /* !__ASSEMBLER__ */
