@@ -177,8 +177,14 @@ void page_init(void)
  */
 struct page_info *page_alloc(int alloc_flags)
 {
-    /* Fill this function in */
-    return 0;
+   	struct page_info* result = page_free_list;
+		if(!page_free_list)
+			return NULL;
+
+		page_free_list = page_free_list->pp_link;
+		result->pp_link = NULL;
+
+    return result;
 }
 
 /*
@@ -187,9 +193,8 @@ struct page_info *page_alloc(int alloc_flags)
  */
 void page_free(struct page_info *pp)
 {
-    /* Fill this function in
-     * Hint: You may want to panic if pp->pp_ref is nonzero or
-     * pp->pp_link is not NULL. */
+	pp->pp_link = page_free_list;
+	page_free_list = pp;
 }
 
 /*
