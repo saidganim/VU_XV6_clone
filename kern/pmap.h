@@ -14,6 +14,7 @@ extern char bootstacktop[], bootstack[];
 extern struct page_info *pages;
 extern size_t npages;
 
+extern pde_t *kern_pgdir;
 
 /* This macro takes a kernel virtual address -- an address that points above
  * KERNBASE, where the machine's maximum 256MB of physical memory is mapped --
@@ -48,12 +49,23 @@ enum {
     ALLOC_PREMAPPED = 1<<2,
 };
 
+enum {
+    /* For pgdir_walk, tells whether to create normal page or huge page */
+    CREATE_NORMAL = 1<<0,
+    CREATE_HUGE   = 1<<1,
+};
+
 void mem_init(void);
 
 void page_init(void);
 struct page_info *page_alloc(int alloc_flags);
 void page_free(struct page_info *pp);
+int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm);
+void page_remove(pde_t *pgdir, void *va);
+struct page_info *page_lookup(pde_t *pgdir, void *va, pte_t **pte_store);
 void page_decref(struct page_info *pp);
+
+void tlb_invalidate(pde_t *pgdir, void *va);
 
 static inline physaddr_t page2pa(struct page_info *pp)
 {
