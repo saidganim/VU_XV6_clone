@@ -182,6 +182,7 @@ struct page_info {
      * boot_alloc do not have valid reference count fields. */
 
     uint16_t pp_ref;
+		char flags;
 };
 
 #endif /* !__ASSEMBLER__ */

@@ -31,6 +31,8 @@
 /* page number field of address */
 #define PGNUM(la)   (((uintptr_t) (la)) >> PTXSHIFT)
 
+#define HUGE_PG 1024 * PGSIZE
+
 /* page directory index */
 #define PDX(la)     ((((uintptr_t) (la)) >> PDXSHIFT) & 0x3FF)
 

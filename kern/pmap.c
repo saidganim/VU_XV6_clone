@@ -151,7 +151,18 @@ void page_init(void)
 			pages[i].pp_link = page_free_list;
 			page_free_list = &pages[i];
 		}
+	}
+}
 
+/*
+ * Removes page_info entry from page_free_list
+ */
+static inline void remove_page_entry(struct page_info *pp){
+	struct page_info **head_list = &page_free_list;
+	while(*head_list){
+		if(*head_list == pp)
+			*head_list = pp->pp_link;
+		head_list = &((*head_list)->pp_link);
 	}
 }
 
@@ -178,12 +189,38 @@ void page_init(void)
 struct page_info *page_alloc(int alloc_flags)
 {
    	struct page_info* result = page_free_list;
+		size_t pgsize = PGSIZE;
+
 		if(!page_free_list)
 			return NULL;
-
-		page_free_list = page_free_list->pp_link;
-		result->pp_link = NULL;
-
+		if(alloc_flags & ALLOC_HUGE){
+			pgsize = HUGE_PG;
+			for(size_t item = 0; item <  npages; ++item){
+				if(pages[item].pp_link != NULL){
+					short int huge_item = 0;
+					for(huge_item = 0; huge_item < PGNUM(HUGE_PG); ++huge_item)
+						if(pages[huge_item + item].pp_link == NULL) break;
+					if(huge_item == PGNUM(HUGE_PG)){
+						for(huge_item = 0; huge_item < PGNUM(HUGE_PG); ++huge_item){
+							remove_page_entry(&pages[huge_item + item]);
+							pages[huge_item + item].pp_link = NULL;
+						}
+						result = &pages[item];
+						result->flags |= ALLOC_HUGE;
+						goto found_page;
+					}
+				}
+			}
+			result = NULL;
+			goto release;
+		} else{
+			page_free_list = page_free_list->pp_link;
+			result->pp_link = NULL;
+		}
+found_page:
+		if(alloc_flags & ALLOC_ZERO)
+			memset(page2kva(result), 0x0, pgsize);
+release:
     return result;
 }
 
@@ -193,8 +230,18 @@ struct page_info *page_alloc(int alloc_flags)
  */
 void page_free(struct page_info *pp)
 {
-	pp->pp_link = page_free_list;
-	page_free_list = pp;
+	size_t mem_size = 0;
+	if(pp->flags & ALLOC_HUGE)
+		for(size_t i = 0; i < PGNUM(HUGE_PG); ++i){
+			pp->pp_link = page_free_list;
+			pp->flags &= ~ALLOC_HUGE;
+			page_free_list = pp++;
+		}
+	else {
+		pp->pp_link = page_free_list;
+		pp->flags &= ~ALLOC_HUGE;
+		page_free_list = pp;
+	}
 }
 
 /*
