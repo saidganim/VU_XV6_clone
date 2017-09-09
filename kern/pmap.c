@@ -670,8 +670,6 @@ static void check_page_alloc(void)
 
     cprintf("[4M] check_page_alloc() succeeded!\n");
 }
-<<<<<<< HEAD
-=======
 
 /*
  * Checks that the kernel part of virtual address space
@@ -987,4 +985,3 @@ static void check_page_hugepages(void)
 
     cprintf("check_page_hugepages() succeeded!\n");
 }
->>>>>>> f9663a1... L2:On The Same Page
