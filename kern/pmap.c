@@ -231,6 +231,12 @@ release:
 void page_free(struct page_info *pp)
 {
 	size_t mem_size = 0;
+
+	//#ifdef BONUS_LAB1
+	if(pp->pp_link != NULL)
+		panic("Double/Invalid deallocating page detected");
+	//#endif
+
 	if(pp->flags & ALLOC_HUGE)
 		for(size_t i = 0; i < PGNUM(HUGE_PG); ++i){
 			pp->pp_link = page_free_list;
