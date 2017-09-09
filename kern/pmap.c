@@ -393,8 +393,24 @@ void page_decref(struct page_info* pp)
  */
 pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
-    /* Fill this function in */
-    return NULL;
+    if(!(*pgdir & PTE_P)){
+			// Page table entry doesn't exist
+				if(create & CREATE_NORMAL){
+					// Allocating new page table entry
+					struct page_info* pp = page_alloc(ALLOC_ZERO);
+					*pgdir = (pde_t)page2kva(pp);
+					*pgdir |= PTE_P;
+					*pgdir |= PTE_W;
+					*pgdir &= ~PTE_PCD; //Present, Writeable, ~Cache-Disable
+				} else {
+					return NULL;
+				}
+		}
+
+		if(create & CREATE_HUGE)
+			*pgdir |= PTE_PS;
+
+    return (pte_t*)PTE_ADDR(*pgdir);
 }
 
 /*
