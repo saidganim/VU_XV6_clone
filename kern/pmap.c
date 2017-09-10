@@ -441,20 +441,33 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
  */
 static void boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
-	size_t nptabl = size / PGSIZE;
-	size_t npdir = nptabl / NPTENTRIES;
-	pte_t *pte_p;
-	pde_t cur_pgdir = (pgdir + PDX(va));
-  for( unsigned int pdir_i = 0; pdir_i <= npdir; ++pdir_i ){
-		// PGDIR walking
-		size_t cur_nptabl = pdir_i == npdir? nptabl % NPTENTRIES : NPTENTRIES;
-		for(unsigned int ptabl_i = 0; ptabl_i < cur_nptabl; ++ptabl_i){
-			// PTE walking
-			pte_p = pgdir_walk(pgdir, (void*)va, CREATE_NORMAL);
-		}
+	// size_t nptabl = size / PGSIZE;
+	// size_t npdir = nptabl / NPTENTRIES;
+	// pte_t *pte_p;
+	// pde_t cur_pgdir = (pgdir + PDX(va));
+  // for( unsigned int pdir_i = 0; pdir_i <= npdir; ++pdir_i ){
+	// 	// PGDIR walking
+	// 	size_t cur_nptabl = pdir_i == npdir? nptabl % NPTENTRIES : NPTENTRIES;
+	// 	for(unsigned int ptabl_i = 0; ptabl_i < cur_nptabl; ++ptabl_i){
+	// 		// PTE walking
+	// 		pte_p = pgdir_walk(pgdir, (void*)va, CREATE_NORMAL);
+	// 	}
+  //
+  //
+	// }
 
+  for(int i = 0; i < size; i++)
+  {
+      //pgdir_walk(pgdir, );
+      pte_t * pg_entry;
+      pg_entry = pgdir_walk(pgdir, (void *) (va + (i * PGSIZE)), CREATE_NORMAL); //1 = create new page table entry
 
-	}
+      //save permissions for this page
+      *pg_entry = pa | perm;
+
+      //go to the next page
+      pa  += PGSIZE;
+  }
 
 }
 
