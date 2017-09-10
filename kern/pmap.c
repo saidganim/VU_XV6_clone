@@ -402,13 +402,20 @@ void page_decref(struct page_info* pp)
  */
 pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
+		pgdir = (pgdir + PDX(va));
     if(!(*pgdir & PTE_P)){
 			// Page table entry doesn't exist
 				if(create & CREATE_NORMAL){
           //we should first allocte a 2nd level page table here
 
 					// Allocating new page table entry
-					struct page_info* pp = page_alloc(ALLOC_ZERO);
+					struct page_info* pp;
+					if(create & CREATE_HUGE){
+						*pgdir |= PTE_PS;
+						pp = page_alloc(ALLOC_ZERO | ALLOC_HUGE);
+					} else {
+						pp = page_alloc(ALLOC_ZERO);
+					}
 					*pgdir = (pde_t)page2kva(pp);
 					*pgdir |= PTE_P;
 					*pgdir |= PTE_W;
@@ -417,9 +424,6 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 					return NULL;
 				}
 		}
-
-		if(create & CREATE_HUGE)
-			*pgdir |= PTE_PS;
 
     return (pte_t*)PTE_ADDR(*pgdir);
 }
@@ -437,23 +441,21 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
  */
 static void boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
-    /* Fill this function in */
+	size_t nptabl = size / PGSIZE;
+	size_t npdir = nptabl / NPTENTRIES;
+	pte_t *pte_p;
+	pde_t cur_pgdir = (pgdir + PDX(va));
+  for( unsigned int pdir_i = 0; pdir_i <= npdir; ++pdir_i ){
+		// PGDIR walking
+		size_t cur_nptabl = pdir_i == npdir? nptabl % NPTENTRIES : NPTENTRIES;
+		for(unsigned int ptabl_i = 0; ptabl_i < cur_nptabl; ++ptabl_i){
+			// PTE walking
+			pte_p = pgdir_walk(pgdir, (void*)va, CREATE_NORMAL);
+		}
 
 
-    for(int i = 0; i < size; i++)
-    {
-        //pgdir_walk(pgdir, );
-        pte_t * pg_entry;
-        pg_entry = pgdir_walk(pgdir, (void *) (va + (i * PGSIZE)), 1); //1 = create new page table entry
+	}
 
-        //save permissions for this page
-        *pg_entry = pa | perm;
-
-        //go to the next page
-        pa  += PGSIZE;
-
-
-    }
 }
 
 /*
@@ -498,6 +500,11 @@ int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm)
     *pt_entry = page2pa(va) | perm | PTE_P;
 
     //return 0 on success
+
+    // pde_t *pte = pgdir_walk(pgdir, (void*)va, 1);
+		// pte = (pte + PTX(va));
+		// if(pte && (*pte & PTE_P))
+		// 	page_remove(pgdir, va) // Page also mapped elsewhere
     return 0;
 }
 
