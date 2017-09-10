@@ -119,7 +119,12 @@ void mem_init(void)
      * table at virtual address UVPT.
      * (For now, you don't have understand the greater purpose of the following
      * line.)
+
+     boot_map_region(kern_pgdir, UPAGES, PTSIZE, PADDR(pages), PTE_P | PTE_U);
      */
+
+     //not sure
+    boot_map_region(kern_pgdir, UVPT, PTSIZE, PADDR(kern_pgdir), 0);
 
     /* Permissions: kernel R, user R */
     kern_pgdir[PDX(UVPT)] = PADDR(kern_pgdir) | PTE_U | PTE_P;
@@ -161,6 +166,7 @@ void mem_init(void)
 
      boot_map_region(kern_pgdir, UPAGES, PTSIZE, PADDR(pages), PTE_P | PTE_U);
 
+     cprintf("allocation of page table 1 ready\n");
 
 
 
@@ -177,6 +183,8 @@ void mem_init(void)
      * Your code goes here:
      */
 
+     boot_map_region(kern_pgdir, KSTACKTOP-KSTKSIZE, KSTKSIZE, PADDR(bootstack), PTE_P | PTE_W);
+     cprintf("allocation of kernel stack ready\n");
     /* Note: Dont map anything between KSTACKTOP - PTSIZE and KSTACKTOP - KTSIZE
      * leaving this as guard region.
      */
@@ -190,6 +198,7 @@ void mem_init(void)
      * Permissions: kernel RW, user NONE
      * Your code goes here:
      */
+     boot_map_region(kern_pgdir, KERNBASE, 0xFFFFFFFF - KERNBASE, 0, PTE_W | PTE_P);
 
     /* Enable Page Size Extensions for huge page support */
     lcr4(rcr4() | CR4_PSE);
@@ -396,6 +405,8 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
     if(!(*pgdir & PTE_P)){
 			// Page table entry doesn't exist
 				if(create & CREATE_NORMAL){
+          //we should first allocte a 2nd level page table here
+
 					// Allocating new page table entry
 					struct page_info* pp = page_alloc(ALLOC_ZERO);
 					*pgdir = (pde_t)page2kva(pp);
@@ -427,9 +438,21 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 static void boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
     /* Fill this function in */
-    for(int i = 0; i < size, i++)
+
+
+    for(int i = 0; i < size; i++)
     {
-        pgdir[PDX(va + i)] = PADDR(pa) | PTE_U | PTE_P;
+        //pgdir_walk(pgdir, );
+        pte_t * pg_entry;
+        pg_entry = pgdir_walk(pgdir, (void *) (va + (i * PGSIZE)), 1); //1 = create new page table entry
+
+        //save permissions for this page
+        *pg_entry = pa | perm;
+
+        //go to the next page
+        pa  += PGSIZE;
+
+
     }
 }
 
@@ -463,6 +486,18 @@ static void boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t 
 int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm)
 {
     /* Fill this function in */
+
+    //insert in page dir
+    pte_t * pt_entry;
+    pt_entry = pgdir_walk(pgdir, va, 1);
+
+    //increase ref count for page
+    ++pp->pp_ref;
+
+    //update permissions
+    *pt_entry = page2pa(va) | perm | PTE_P;
+
+    //return 0 on success
     return 0;
 }
 
