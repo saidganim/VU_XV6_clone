@@ -287,7 +287,7 @@ struct page_info *page_alloc(int alloc_flags)
 		if(alloc_flags & ALLOC_HUGE){
 			pgsize = HUGE_PG;
 			for(size_t item = 0; item <  npages; ++item){
-				if(pages[item].pp_link != NULL){
+				if(pages[item].pp_link != NULL && (page2pa(pages + item) % HUGE_PG) == 0){
 					short int huge_item = 0;
 					for(huge_item = 0; huge_item < PGNUM(HUGE_PG); ++huge_item)
 						if(pages[huge_item + item].pp_link == NULL) break;
