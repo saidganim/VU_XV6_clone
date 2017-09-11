@@ -1,4 +1,4 @@
-cd /h g/* See COPYRIGHT for copyright information. */
+/* See COPYRIGHT for copyright information. */
 
 #include <inc/x86.h>
 #include <inc/mmu.h>
@@ -287,6 +287,11 @@ struct page_info *page_alloc(int alloc_flags)
 
 		if(!page_free_list)
 			return NULL;
+    if(alloc_flags & ALLOC_PREMAPPED)
+    {
+
+      cprintf("this\n");
+    }
 		if(alloc_flags & ALLOC_HUGE){
 			pgsize = HUGE_PG;
 			for(size_t item = 0; item <  npages; ++item){
@@ -392,13 +397,16 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 		pgdir = pgdir + PDX(va);
 		short int page_bool = *pgdir & PTE_P;
 
+    cprintf("trying to find line\n");
 		if(!page_bool){
+      cprintf("page not present\n");
 			if(!(create & (CREATE_NORMAL || CREATE_HUGE) ))
 				return NULL;
 			page_bool = create & CREATE_NORMAL;
 			struct page_info *pp = NULL;
 			if(page_bool){ // normal page
 				pp = page_alloc(0);
+        cprintf("small page\n");
 				if(!pp)
 					return NULL; // No enough memory
 				*pgdir = page2pa(pp);
@@ -409,6 +417,7 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 		}
 
 		if(create & CREATE_HUGE){
+      cprintf("huge page\n");
 			result = (pte_t*)pgdir; // points to itself
 			*result |= PTE_PS;
 			*result |= PTE_P;
@@ -471,23 +480,56 @@ static void boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t 
 int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm)
 {
 		short int page_bool = pp->flags & HUGE_PG? CREATE_HUGE : CREATE_NORMAL;
-   	pte_t *pte = pgdir_walk(pgdir, va, 0);
+   	//pte_t *pte = pgdir_walk(pgdir, va, 1);
+
+
 		pde_t *cur_pgdir = pgdir + PDX(va);
 
 		if(pp->flags & ALLOC_HUGE)
 			*cur_pgdir |= PTE_PS;
 
-		if(pte)
-			page_remove(pgdir, va);
+		// if(pte)
+		// 	page_remove(pgdir, va);
 
-		pte = pgdir_walk(pgdir, va, page_bool);
+    cprintf("starting page walk\n");
+		pte_t * pte = pgdir_walk(pgdir, va, page_bool);
+
+    perm = perm & 0xfff; //I only need the rightmost bits
+
 		cprintf("PAGE INSERT with pte = %p , %d\n", pte, page_bool);
-		if(!pte)
+
+		if(!pte)  //no space for allocation
 			return -E_NO_MEM;
-		cprintf("CHECK\n");
-		*pte = page2pa(pp);
-		*pte |= perm | PTE_P | PTE_PS;
-		tlb_invalidate(pgdir, va);
+    if(*pte &= PTE_P) //page was correctly allocated
+    {
+        //check if page is already mapped in va, in that case remove it and invalidate tlb
+        if(PTE_ADDR(pte) != page2pa(pp))
+        {
+          cprintf("removing old page to update\n");
+          page_remove(pgdir, va);
+
+          tlb_invalidate(pgdir, va);
+
+          //allocate new page
+        }
+        else
+        {
+          cprintf("this page is already present, update permissions\n");
+          *pte = (*pte & 0xfffff000) | PTE_P | perm;
+          //update permissions
+        }
+    }
+    else
+    {
+      cprintf("CHECK\n");
+  		*pte = page2pa(pp);
+  		*pte |= perm | PTE_P;
+
+      ++pp->pp_ref; // increment reference count for the allocated page
+  		//tlb_invalidate(pgdir, va);
+    }
+
+
     return 0;
 }
 
@@ -505,7 +547,22 @@ int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm)
 struct page_info *page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
     /* Fill this function in */
-    return NULL;
+    pte_t *pg_entry;
+    pg_entry = pgdir_walk(pgdir, va, 0);
+
+    if(pg_entry == NULL)
+    {
+      //no page is present
+      return NULL;
+    }
+    else
+    {
+      *pte_store = pg_entry;
+    }
+
+    physaddr_t pa = PTE_ADDR(pg_entry);
+    return pa2page(pa);
+    //return NULL;
 }
 
 /*
@@ -841,12 +898,19 @@ static void check_page(void)
     /* there is no page allocated at address 0 */
     assert(page_lookup(kern_pgdir, (void *) 0x0, &ptep) == NULL);
     /* there is no free memory, so we can't allocate a page table */
+
     assert(page_insert(kern_pgdir, pp1, 0x0, PTE_W) < 0);
+    cprintf("problem here:\n");
 
     /* free pp0 and try again: pp0 should be used for page table */
     page_free(pp0);
+
+    cprintf("here?\n");
     assert(page_insert(kern_pgdir, pp1, 0x0, PTE_W) == 0);
 		cprintf("WTFaaaaaaaaaaaaaaa\n");
+
+
+
     assert(PTE_ADDR(kern_pgdir[0]) == page2pa(pp0));
     assert(check_va2pa(kern_pgdir, 0x0) == page2pa(pp1));
     assert(pp1->pp_ref == 1);
