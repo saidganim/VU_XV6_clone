@@ -8,6 +8,8 @@
 #include <kern/console.h>
 #include <kern/pmap.h>
 #include <kern/kclock.h>
+#include <kern/env.h>
+#include <kern/trap.h>
 
 
 void i386_init(void)
@@ -23,12 +25,23 @@ void i386_init(void)
      * Can't call cprintf until after we do this! */
     cons_init();
 
-    /* Lab 1 memory management initialization functions */
+    /* Lab 1 and 2 memory management initialization functions. */
     mem_init();
 
-    /* Drop into the kernel monitor. */
-    while (1)
-        monitor(NULL);
+    /* Lab 3 user environment initialization functions. */
+    env_init();
+    trap_init();
+
+#if defined(TEST)
+    /* Don't touch -- used by grading script! */
+    ENV_CREATE(TEST, ENV_TYPE_USER);
+#else
+    /* Touch all you want. */
+    ENV_CREATE(user_divzero, ENV_TYPE_USER);
+#endif
+
+    /* We only have one user environment for now, so just run it. */
+    env_run(&envs[0]);
 }
 
 

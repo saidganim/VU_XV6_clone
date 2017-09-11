@@ -6,7 +6,6 @@
 #	http://aegis.sourceforge.net/auug97.pdf
 #
 OBJDIR := obj
-L1_COMMIT := "`git rev-list --max-parents=0 HEAD`"
 COMMIT := ""
 
 # Run 'make V=1' to turn on verbose commands, or 'make V=0' to turn them off.
@@ -139,6 +138,8 @@ $(OBJDIR)/.vars.%: FORCE
 # Include Makefrags for subdirectories
 include boot/Makefrag
 include kern/Makefrag
+include lib/Makefrag
+include user/Makefrag
 
 
 QEMUOPTS = -hda $(OBJDIR)/kern/kernel.img -serial mon:stdio -gdb tcp::$(GDBPORT)
@@ -204,23 +205,12 @@ grade:
 	  (echo "'make clean' failed.  HINT: Do you have another running instance of JOS?" && exit 1)
 	./grade-lab$(LAB) $(GRADEFLAGS)
 
-handin-oldway: handin-check
-	@echo "Hand in: Creating your solution-patch for L${LAB} using:"; \
-	echo "    'git format-patch ${L1_COMMIT} --stdout > ${PATCH_PREFIX}.lab${LAB}.patch' "; \
-	if ! git format-patch ${L1_COMMIT} --stdout > ${PATCH_PREFIX}.lab${LAB}.patch; then \
-        	echo ; \
-		echo "Hand-in patch creation failed."; \
-		echo "As an alternative, please run 'make tarball'"; \
-		echo "and submit lab$(LAB)-handin.tar.gz.  Thanks!"; \
-		false; \
-	fi; \
-
 handin: handin-check
 ifeq (${COMMIT}, "")
 		@git --no-pager log -3 --pretty=oneline;
 		@echo "You did not specify a commit hash.";
 		@echo "Please set COMMIT variable in the command line:";
-		@echo "> make handin COMMIT=<your commit-hash>"
+		@echo "> make handin COMMIT=<your commit-hash>";
 		@false;
 endif
 	@if git tag -l | grep "${TAG_LAB_SOLN}" >/dev/null; then \
@@ -243,7 +233,7 @@ ifeq (${COMMIT}, "")
 		@git --no-pager log -3 --pretty=oneline;
 		@echo "You did not specify a commit hash for BONUS.";
 		@echo "Please set COMMIT variable in the command line:";
-		@echo "> make handin COMMIT=<your commit-hash>"
+		@echo "> make handin COMMIT=<your commit-hash>";
 		@false;
 endif
 	@if git tag -l | grep "${TAG_LAB_BONUS}" >/dev/null; then \
@@ -295,6 +285,22 @@ apply: ${PATCH_PREFIX}.lab${LAB}.patch apply-check
 		echo "Failed to apply your soln patch: ${PATCH_PREFIX}.lab${LAB}.patch"; \
 	fi; \
 
+# For test runs
+
+prep-%:
+	$(V)$(MAKE) "INIT_CFLAGS=${INIT_CFLAGS} -DTEST=`case $* in *_*) echo $*;; *) echo user_$*;; esac`" $(IMAGES)
+
+run-%-nox-gdb: prep-% pre-qemu
+	$(QEMU) -nographic $(QEMUOPTS) -S
+
+run-%-gdb: prep-% pre-qemu
+	$(QEMU) $(QEMUOPTS) -S
+
+run-%-nox: prep-% pre-qemu
+	$(QEMU) -nographic $(QEMUOPTS)
+
+run-%: prep-% pre-qemu
+	$(QEMU) $(QEMUOPTS)
 
 # This magic automatically generates makefile dependencies
 # for header files included from C source files we compile,
