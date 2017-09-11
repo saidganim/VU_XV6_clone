@@ -1,4 +1,4 @@
-/* See COPYRIGHT for copyright information. */
+cd /h g/* See COPYRIGHT for copyright information. */
 
 #include <inc/x86.h>
 #include <inc/mmu.h>
@@ -154,15 +154,9 @@ void mem_init(void)
      *      (ie. perm = PTE_U | PTE_P)
      *    - pages itself -- kernel RW, user NONE
      * Your code goes here:
-
-     I will use
-     boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
      */
 
-     boot_map_region(kern_pgdir, UPAGES, PTSIZE, PADDR(pages), PTE_P | PTE_U);
-
-
-
+		 boot_map_region(kern_pgdir, UPAGES, npages * sizeof(struct page_info), PADDR(pages),  PTE_U | PTE_P);
 
     /*********************************************************************
      * Use the physical memory that 'bootstack' refers to as the kernel
@@ -176,7 +170,7 @@ void mem_init(void)
      *     Permissions: kernel RW, user NONE
      * Your code goes here:
      */
-
+		 boot_map_region(kern_pgdir, KSTACKTOP, KSTKSIZE, (physaddr_t)bootstack, PTE_P | PTE_W);
     /* Note: Dont map anything between KSTACKTOP - PTSIZE and KSTACKTOP - KTSIZE
      * leaving this as guard region.
      */
@@ -190,6 +184,7 @@ void mem_init(void)
      * Permissions: kernel RW, user NONE
      * Your code goes here:
      */
+		 boot_map_region(kern_pgdir, KERNBASE, MAX_VA - KERNBASE, 0x0, PTE_W | PTE_P);
 
     /* Enable Page Size Extensions for huge page support */
     lcr4(rcr4() | CR4_PSE);
@@ -295,7 +290,7 @@ struct page_info *page_alloc(int alloc_flags)
 		if(alloc_flags & ALLOC_HUGE){
 			pgsize = HUGE_PG;
 			for(size_t item = 0; item <  npages; ++item){
-				if(pages[item].pp_link != NULL && (page2pa(pages + item) % (HUGE_PG) == 0) ){
+				if(pages[item].pp_link != NULL && (page2pa(pages + item) % HUGE_PG) == 0){
 					short int huge_item = 0;
 					for(huge_item = 0; huge_item < PGNUM(HUGE_PG); ++huge_item)
 						if(pages[huge_item + item].pp_link == NULL) break;
@@ -393,24 +388,35 @@ void page_decref(struct page_info* pp)
  */
 pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
-    if(!(*pgdir & PTE_P)){
-			// Page table entry doesn't exist
-				if(create & CREATE_NORMAL){
-					// Allocating new page table entry
-					struct page_info* pp = page_alloc(ALLOC_ZERO);
-					*pgdir = (pde_t)page2kva(pp);
-					*pgdir |= PTE_P;
-					*pgdir |= PTE_W;
-					*pgdir &= ~PTE_PCD; //Present, Writeable, ~Cache-Disable
-				} else {
-					return NULL;
-				}
+		pte_t *result = (pte_t*)PTE_ADDR(*pgdir);
+		pgdir = pgdir + PDX(va);
+		short int page_bool = *pgdir & PTE_P;
+
+		if(!page_bool){
+			if(!(create & (CREATE_NORMAL || CREATE_HUGE) ))
+				return NULL;
+			page_bool = create & CREATE_NORMAL;
+			struct page_info *pp = NULL;
+			if(page_bool){ // normal page
+				pp = page_alloc(0);
+				if(!pp)
+					return NULL; // No enough memory
+				*pgdir = page2pa(pp);
+				*pgdir |= PTE_P;
+				result = (pte_t*)PTE_ADDR(*pgdir);
+			}
+
 		}
 
-		if(create & CREATE_HUGE)
-			*pgdir |= PTE_PS;
+		if(create & CREATE_HUGE){
+			result = (pte_t*)pgdir; // points to itself
+			*result |= PTE_PS;
+			*result |= PTE_P;
+		}
 
-    return (pte_t*)PTE_ADDR(*pgdir);
+
+		*pgdir &= ~PTE_PCD; // Enabling caching for this page
+		return result;
 }
 
 /*
@@ -426,11 +432,13 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
  */
 static void boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
-    /* Fill this function in */
-    for(int i = 0; i < size, i++)
-    {
-        pgdir[PDX(va + i)] = PADDR(pa) | PTE_U | PTE_P;
-    }
+    size = ROUNDUP(size, PGSIZE) / PGSIZE;
+		for(unsigned int pg_i = 0;  pg_i < size; ++pg_i){
+			pte_t *pte = pgdir_walk(pgdir, (void*)(va + pg_i * PGSIZE), CREATE_NORMAL);
+			struct page_info *pp = page_alloc(0);
+			*pte = page2pa(pp) | perm | PTE_P;
+		}
+
 }
 
 /*
@@ -462,7 +470,24 @@ static void boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t 
  */
 int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm)
 {
-    /* Fill this function in */
+		short int page_bool = pp->flags & HUGE_PG? CREATE_HUGE : CREATE_NORMAL;
+   	pte_t *pte = pgdir_walk(pgdir, va, 0);
+		pde_t *cur_pgdir = pgdir + PDX(va);
+
+		if(pp->flags & ALLOC_HUGE)
+			*cur_pgdir |= PTE_PS;
+
+		if(pte)
+			page_remove(pgdir, va);
+
+		pte = pgdir_walk(pgdir, va, page_bool);
+		cprintf("PAGE INSERT with pte = %p , %d\n", pte, page_bool);
+		if(!pte)
+			return -E_NO_MEM;
+		cprintf("CHECK\n");
+		*pte = page2pa(pp);
+		*pte |= perm | PTE_P | PTE_PS;
+		tlb_invalidate(pgdir, va);
     return 0;
 }
 
@@ -500,7 +525,20 @@ struct page_info *page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
  */
 void page_remove(pde_t *pgdir, void *va)
 {
-    /* Fill this function in */
+		pde_t *cur_pgdir = pgdir + PDX(va);
+		pte_t *pte = pgdir_walk(pgdir, va, 0);
+		struct page_info *pp;
+
+		if(!pte)
+			return;
+
+		pp = pa2page(PTE_ADDR(*pte));
+		page_decref(pp);
+		if(!pp->pp_ref)
+			page_free(pp);
+		cur_pgdir = (*cur_pgdir & (PTE_PS | PTE_P))? cur_pgdir : (pde_t*)*(pte + PTX(pte));
+  	*cur_pgdir = 0x0;
+		tlb_invalidate(pgdir, va);
 }
 
 /*
@@ -808,6 +846,7 @@ static void check_page(void)
     /* free pp0 and try again: pp0 should be used for page table */
     page_free(pp0);
     assert(page_insert(kern_pgdir, pp1, 0x0, PTE_W) == 0);
+		cprintf("WTFaaaaaaaaaaaaaaa\n");
     assert(PTE_ADDR(kern_pgdir[0]) == page2pa(pp0));
     assert(check_va2pa(kern_pgdir, 0x0) == page2pa(pp1));
     assert(pp1->pp_ref == 1);

@@ -11,6 +11,9 @@
  * which are relevant to both the kernel and user-mode software.
  */
 
+/* max value of possible virtual address */
+#define MAX_VA 0xFFFFFFFF
+
 /* Global descriptor numbers */
 #define GD_KT     0x08     /* kernel text */
 #define GD_KD     0x10     /* kernel data */
@@ -172,6 +175,7 @@ extern volatile pde_t uvpd[];     /* VA of current page directory */
  * You can map a struct PageInfo * to the corresponding physical address
  * with page2pa() in kern/pmap.h.
  */
+
 struct page_info {
     /* Next page on the free list. */
     struct page_info *pp_link;
