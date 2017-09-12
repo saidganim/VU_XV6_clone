@@ -287,7 +287,7 @@ struct page_info *page_alloc(int alloc_flags)
 		if(alloc_flags & ALLOC_HUGE){
 			pgsize = HUGE_PG;
 			for(size_t item = 0; item <  npages; ++item){
-				if(pages[item].pp_link != NULL){
+				if(pages[item].pp_link != NULL && page2pa(&pages[item]) % HUGE_PG == 0){
 					short int huge_item = 0;
 					for(huge_item = 0; huge_item < PGNUM(HUGE_PG); ++huge_item)
 						if(pages[huge_item + item].pp_link == NULL) break;
@@ -385,8 +385,27 @@ void page_decref(struct page_info* pp)
  */
 pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
-    /* Fill this function in */
-    return NULL;
+		pte_t *result = NULL;
+   	pgdir = pgdir + PDX(va);
+		if(*pgdir & PTE_P)
+			result = KADDR(PTE_ADDR(*pgdir) + PTX(va));
+		else {
+			if(!(create & (CREATE_HUGE || CREATE_NORMAL)))
+				goto release;
+			if(create & CREATE_NORMAL){
+				// NORMAL PAGE
+				struct page_info *pp = page_alloc(ALLOC_PREMAPPED);
+				*pgdir = page2pa(pp) | PTE_P;
+				result = KADDR(PTE_ADDR(*pgdir) + PTX(va));
+				goto release;
+			} else {
+				// HUGE PAGE
+				result = pgdir;
+				goto release;
+			}
+		}
+	release:
+    return result;
 }
 
 /*
@@ -670,8 +689,6 @@ static void check_page_alloc(void)
 
     cprintf("[4M] check_page_alloc() succeeded!\n");
 }
-<<<<<<< HEAD
-=======
 
 /*
  * Checks that the kernel part of virtual address space
@@ -987,4 +1004,3 @@ static void check_page_hugepages(void)
 
     cprintf("check_page_hugepages() succeeded!\n");
 }
->>>>>>> f9663a1... L2:On The Same Page
