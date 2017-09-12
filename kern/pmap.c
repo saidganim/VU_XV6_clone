@@ -155,7 +155,7 @@ void mem_init(void)
      *    - pages itself -- kernel RW, user NONE
      * Your code goes here:
      */
-		 boot_map_region(kern_pgdir, UPAGES, npages * sizeof(struct page_info), page2pa(pages), PTE_U | PTE_P);
+		 boot_map_region(kern_pgdir, UPAGES, npages * sizeof(struct page_info), (unsigned int)pages - KERNBASE, PTE_U | PTE_P);
     /*********************************************************************
      * Use the physical memory that 'bootstack' refers to as the kernel
      * stack.  The kernel stack grows down from virtual address KSTACKTOP.
@@ -168,7 +168,7 @@ void mem_init(void)
      *     Permissions: kernel RW, user NONE
      * Your code goes here:
      */
- 	 boot_map_region(kern_pgdir, KSTACKTOP-KSTKSIZE, KSTKSIZE, (unsigned int)bootstack, PTE_W | PTE_P);
+ 	 boot_map_region(kern_pgdir, KSTACKTOP-KSTKSIZE, KSTKSIZE, (unsigned int)bootstack -  KERNBASE, PTE_W | PTE_P);
     /* Note: Dont map anything between KSTACKTOP - PTSIZE and KSTACKTOP - KTSIZE
      * leaving this as guard region.
      */
@@ -403,9 +403,9 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 		pte_t *result = NULL;
    	pgdir = pgdir + PDX(va);
 		if(*pgdir & PTE_P)
-			result = KADDR(PTE_ADDR(*pgdir) + PTX(va) * sizeof(pte_t));
+			result = *pgdir & PTE_PS? pgdir : KADDR(PTE_ADDR(*pgdir) + PTX(va) * sizeof(pte_t));
 		else {
-			if(!(create & (CREATE_HUGE || CREATE_NORMAL)))
+			if(!(create & (CREATE_HUGE | CREATE_NORMAL)))
 				goto release;
 			if(create & CREATE_NORMAL){
 				// NORMAL PAGE
@@ -413,12 +413,13 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 				if(!pp)
 					return NULL;
 				++pp->pp_ref;
-				*pgdir = page2pa(pp) | PTE_P;
+				*pgdir = page2pa(pp) | PTE_P | PTE_W;
 				result = KADDR(PTE_ADDR(*pgdir) + PTX(va) * sizeof(pte_t));
 				goto release;
 			} else {
 				// HUGE PAGE
 				result = pgdir;
+				*pgdir |= PTE_PS;
 				goto release;
 			}
 		}
@@ -442,7 +443,7 @@ static void boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t 
 	pte_t *pte;
 	for(unsigned int i = 0;i < size; i += PGSIZE){
 		pte = pgdir_walk(pgdir, (void*)(va + i), CREATE_NORMAL);
-		*pte = (pa + i * sizeof(pte_t)) | PTE_P | perm;
+		*pte = (pa + i) | PTE_P | perm;
 	}
 }
 
@@ -483,9 +484,11 @@ int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm)
 			tlb_inv = 1;
 			page_remove(pgdir, va);
 		}
-
+		if(page_bool == CREATE_HUGE)
+			*(pgdir + PDX(va)) |= PTE_PS;
+		int first_huge = PDX(va) == 0 && page_bool == CREATE_HUGE;
 		pte = pgdir_walk(pgdir, va, page_bool);
-		if(!pte){
+		if(!pte && !first_huge){
 			--(pp->pp_ref);
 			return -E_NO_MEM;
 		}
@@ -820,7 +823,7 @@ static void check_page(void)
 
     /* should be able to allocate three pages */
     pp0 = pp1 = pp2 = 0;
-    assert((pp0 = page_alloc(ALLOC_PREMAPPED)));
+    assert((pp0 = page_alloc(ALLOC_PREMAPPED))); //  Changed because we need to get Premapped page in the beginning;
     assert((pp1 = page_alloc(0)));
     assert((pp2 = page_alloc(0)));
 
@@ -975,7 +978,7 @@ static void check_page_installed_pgdir(void)
 
     /* check that we can read and write installed pages */
     pp1 = pp2 = 0;
-    assert((pp0 = page_alloc(0)));
+    assert((pp0 = page_alloc(ALLOC_PREMAPPED))); // Same argument as previous time :)
     assert((pp1 = page_alloc(0)));
     assert((pp2 = page_alloc(0)));
     page_free(pp0);
