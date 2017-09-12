@@ -284,7 +284,20 @@ struct page_info *page_alloc(int alloc_flags)
 
 		if(!page_free_list)
 			return NULL;
-		if(alloc_flags & ALLOC_HUGE){
+		if(alloc_flags & ALLOC_PREMAPPED){
+			// ALLOC_PREMAPPED HACK
+			struct page_info **head_list = &page_free_list;
+			while(*head_list){
+				if(page2pa(*head_list) >= 0 && page2pa(*head_list) < HUGE_PG ){
+					result = *head_list;
+					*head_list = pp->pp_link;
+					goto found_page;
+				}
+				head_list = &((*head_list)->pp_link);
+			}
+			result = NULL;
+			goto release;
+		} else if(alloc_flags & ALLOC_HUGE){
 			pgsize = HUGE_PG;
 			for(size_t item = 0; item <  npages; ++item){
 				if(pages[item].pp_link != NULL && page2pa(&pages[item]) % HUGE_PG == 0){
