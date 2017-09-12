@@ -155,7 +155,7 @@ void mem_init(void)
      *    - pages itself -- kernel RW, user NONE
      * Your code goes here:
      */
-
+		 boot_map_region(kern_pgdir, UPAGES, npages * sizeof(struct page_info), page2pa(pages), PTE_U | PTE_P);
     /*********************************************************************
      * Use the physical memory that 'bootstack' refers to as the kernel
      * stack.  The kernel stack grows down from virtual address KSTACKTOP.
@@ -168,7 +168,7 @@ void mem_init(void)
      *     Permissions: kernel RW, user NONE
      * Your code goes here:
      */
-
+ 	 boot_map_region(kern_pgdir, KSTACKTOP-KSTKSIZE, KSTKSIZE, (unsigned int)bootstack, PTE_W | PTE_P);
     /* Note: Dont map anything between KSTACKTOP - PTSIZE and KSTACKTOP - KTSIZE
      * leaving this as guard region.
      */
@@ -182,7 +182,7 @@ void mem_init(void)
      * Permissions: kernel RW, user NONE
      * Your code goes here:
      */
-
+		 boot_map_region(kern_pgdir, KERNBASE, 0xffffffff - KERNBASE, 0x0, PTE_W | PTE_P);
     /* Enable Page Size Extensions for huge page support */
     lcr4(rcr4() | CR4_PSE);
 
@@ -232,7 +232,7 @@ void page_init(void)
 	short int in_io_hole;
 	short int in_kern_area;
 	extern char end[];
-	page_free_list = 0;
+	page_free_list = 0x0;
 	for (i = 1; i < npages; i++) {
 		in_io_hole = (i >= PGNUM(IOPHYSMEM) && i < PGNUM(EXTPHYSMEM));
 		in_kern_area = (i >= PGNUM(EXTPHYSMEM)) && i < (PGNUM(boot_alloc(0) - KERNBASE));
@@ -281,16 +281,17 @@ struct page_info *page_alloc(int alloc_flags)
 {
    	struct page_info* result = page_free_list;
 		size_t pgsize = PGSIZE;
-
 		if(!page_free_list)
 			return NULL;
 		if(alloc_flags & ALLOC_PREMAPPED){
 			// ALLOC_PREMAPPED HACK
 			struct page_info **head_list = &page_free_list;
 			while(*head_list){
-				if(page2pa(*head_list) >= 0 && page2pa(*head_list) < HUGE_PG ){
+				if((unsigned int)page2kva(*head_list) >= (0 + KERNBASE) && (unsigned int)page2kva(*head_list) < (HUGE_PG + KERNBASE) ){
 					result = *head_list;
 					*head_list = (*head_list)->pp_link;
+					result->pp_link = NULL;
+					result->flags = 0x0;
 					goto found_page;
 				}
 				head_list = &((*head_list)->pp_link);
@@ -322,8 +323,10 @@ struct page_info *page_alloc(int alloc_flags)
 			result->pp_link = NULL;
 		}
 found_page:
-		if(alloc_flags & ALLOC_ZERO)
+		if(alloc_flags & ALLOC_ZERO){
 			memset(page2kva(result), 0x0, pgsize);
+		}
+
 release:
     return result;
 }
@@ -340,7 +343,6 @@ void page_free(struct page_info *pp)
 	if(pp->pp_link != NULL)
 		panic("Double/Invalid deallocating page detected");
 	//#endif
-
 	if(pp->flags & ALLOC_HUGE)
 		for(size_t i = 0; i < PGNUM(HUGE_PG); ++i){
 			pp->pp_link = page_free_list;
@@ -401,15 +403,18 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 		pte_t *result = NULL;
    	pgdir = pgdir + PDX(va);
 		if(*pgdir & PTE_P)
-			result = KADDR(PTE_ADDR(*pgdir) + PTX(va));
+			result = KADDR(PTE_ADDR(*pgdir) + PTX(va) * sizeof(pte_t));
 		else {
 			if(!(create & (CREATE_HUGE || CREATE_NORMAL)))
 				goto release;
 			if(create & CREATE_NORMAL){
 				// NORMAL PAGE
-				struct page_info *pp = page_alloc(ALLOC_PREMAPPED);
+				struct page_info *pp = page_alloc(ALLOC_PREMAPPED | ALLOC_ZERO);
+				if(!pp)
+					return NULL;
+				++pp->pp_ref;
 				*pgdir = page2pa(pp) | PTE_P;
-				result = page2kva(pp) + PTX(va);
+				result = KADDR(PTE_ADDR(*pgdir) + PTX(va) * sizeof(pte_t));
 				goto release;
 			} else {
 				// HUGE PAGE
@@ -434,7 +439,11 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
  */
 static void boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
-    /* Fill this function in */
+	pte_t *pte;
+	for(unsigned int i = 0;i < size; i += PGSIZE){
+		pte = pgdir_walk(pgdir, (void*)(va + i), CREATE_NORMAL);
+		*pte = (pa + i * sizeof(pte_t)) | PTE_P | perm;
+	}
 }
 
 /*
@@ -469,15 +478,18 @@ int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm)
 		pte_t *pte = pgdir_walk(pgdir, va, 0);
 		int page_bool = pp->flags & ALLOC_HUGE? CREATE_HUGE :  CREATE_NORMAL;
 		int tlb_inv = 0;
-		++pp->pp_link;
+		++(pp->pp_ref);
 		if(pte){
 			tlb_inv = 1;
 			page_remove(pgdir, va);
 		}
 
 		pte = pgdir_walk(pgdir, va, page_bool);
-		if(!pte)
+		if(!pte){
+			--(pp->pp_ref);
 			return -E_NO_MEM;
+		}
+		*(pgdir + PDX(va)) |= perm;
 		*pte = page2pa(pp) | perm | PTE_P;
 		if(tlb_inv)
 			tlb_invalidate(pgdir, va);
@@ -502,7 +514,7 @@ struct page_info *page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
     	return NULL;
 		if(pte_store)
 			*pte_store = pte;
-		return pa2page(*(pte + PTX(va)));
+		return pa2page(*(pte) + PTX(va));
 }
 
 /*
@@ -522,7 +534,13 @@ struct page_info *page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
  */
 void page_remove(pde_t *pgdir, void *va)
 {
-    //pte_t *pte =
+    pte_t *pte = pgdir_walk(pgdir, va, 0);
+		if(!pte)
+			return;
+		struct page_info *pp = page_lookup(pgdir, va, 0x0);
+		page_decref(pp);
+		*pte = 0x0;
+
 }
 
 /*
@@ -802,7 +820,7 @@ static void check_page(void)
 
     /* should be able to allocate three pages */
     pp0 = pp1 = pp2 = 0;
-    assert((pp0 = page_alloc(0)));
+    assert((pp0 = page_alloc(ALLOC_PREMAPPED)));
     assert((pp1 = page_alloc(0)));
     assert((pp2 = page_alloc(0)));
 
