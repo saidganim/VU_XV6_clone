@@ -504,8 +504,14 @@ int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm)
  */
 struct page_info *page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
-    /* Fill this function in */
-    return NULL;
+    pte_t *pte = pgdir_walk(pgdir, va, 0);
+		int page_exists = pte && (*pte & PTE_P);
+		if(!page_exists)
+			return NULL;
+		if(pte_store)
+			*pte_store = pte;
+		physaddr_t addr = PTE_ADDR(*(pte + PTX(va)));
+		return pa2page(addr);
 }
 
 /*
