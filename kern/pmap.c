@@ -388,11 +388,12 @@ void page_decref(struct page_info* pp)
  */
 pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
-		pte_t *result = (pte_t*)PTE_ADDR(*pgdir);
+		pte_t *result;
 		pgdir = pgdir + PDX(va);
 		short int page_bool = *pgdir & PTE_P;
-
-		if(!page_bool){
+		if(page_bool){
+			result = *pgdir & PTE_PS? (pte_t*)pgdir : (pte_t*)PTE_ADDR(*pgdir);
+		} else {
 			if(!(create & (CREATE_NORMAL || CREATE_HUGE) ))
 				return NULL;
 			page_bool = create & CREATE_NORMAL;
@@ -404,16 +405,12 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 				*pgdir = page2pa(pp);
 				*pgdir |= PTE_P;
 				result = (pte_t*)PTE_ADDR(*pgdir);
+			} else { // huge page
+				result = (pte_t*)pgdir; // points to itself
+				*result |= PTE_PS;
+				*result |= PTE_P;
 			}
-
 		}
-
-		if(create & CREATE_HUGE){
-			result = (pte_t*)pgdir; // points to itself
-			*result |= PTE_PS;
-			*result |= PTE_P;
-		}
-
 
 		*pgdir &= ~PTE_PCD; // Enabling caching for this page
 		return result;
