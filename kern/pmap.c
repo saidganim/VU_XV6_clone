@@ -290,7 +290,7 @@ struct page_info *page_alloc(int alloc_flags)
 			while(*head_list){
 				if(page2pa(*head_list) >= 0 && page2pa(*head_list) < HUGE_PG ){
 					result = *head_list;
-					*head_list = pp->pp_link;
+					*head_list = (*head_list)->pp_link;
 					goto found_page;
 				}
 				head_list = &((*head_list)->pp_link);
@@ -409,7 +409,7 @@ pte_t *pgdir_walk(pde_t *pgdir, const void *va, int create)
 				// NORMAL PAGE
 				struct page_info *pp = page_alloc(ALLOC_PREMAPPED);
 				*pgdir = page2pa(pp) | PTE_P;
-				result = KADDR(PTE_ADDR(*pgdir) + PTX(va));
+				result = page2kva(pp) + PTX(va);
 				goto release;
 			} else {
 				// HUGE PAGE
@@ -466,7 +466,21 @@ static void boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t 
  */
 int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm)
 {
-    /* Fill this function in */
+		pte_t *pte = pgdir_walk(pgdir, va, 0);
+		int page_bool = pp->flags & ALLOC_HUGE? CREATE_HUGE :  CREATE_NORMAL;
+		int tlb_inv = 0;
+		++pp->pp_link;
+		if(pte){
+			tlb_inv = 1;
+			page_remove(pgdir, va);
+		}
+
+		pte = pgdir_walk(pgdir, va, page_bool);
+		if(!pte)
+			return -E_NO_MEM;
+		*pte = page2pa(pp) | perm | PTE_P;
+		if(tlb_inv)
+			tlb_invalidate(pgdir, va);
     return 0;
 }
 
@@ -483,8 +497,12 @@ int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm)
  */
 struct page_info *page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
-    /* Fill this function in */
-    return NULL;
+    pte_t *pte = pgdir_walk(pgdir, va, 0);
+		if(!pte)
+    	return NULL;
+		if(pte_store)
+			*pte_store = pte;
+		return pa2page(*(pte + PTX(va)));
 }
 
 /*
@@ -504,7 +522,7 @@ struct page_info *page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
  */
 void page_remove(pde_t *pgdir, void *va)
 {
-    /* Fill this function in */
+    //pte_t *pte =
 }
 
 /*
