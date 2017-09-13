@@ -480,7 +480,7 @@ int page_insert(pde_t *pgdir, struct page_info *pp, void *va, int perm)
 		int page_bool = pp->flags & ALLOC_HUGE? CREATE_HUGE :  CREATE_NORMAL;
 		int tlb_inv = 0;
 		++(pp->pp_ref);
-		if(pte){
+		if(pte && (*pte & PTE_P)){
 			tlb_inv = 1;
 			page_remove(pgdir, va);
 		}
