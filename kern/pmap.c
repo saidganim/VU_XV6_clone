@@ -138,6 +138,8 @@ void mem_init(void)
      * LAB 3: Your code here.
      */
 
+     envs = boot_alloc(NENV * sizeof(struct env));
+
 		 pages = boot_alloc(npages * sizeof(struct page_info));
 
     /*********************************************************************
@@ -182,6 +184,7 @@ void mem_init(void)
      * LAB 3: Your code here.
      */
 
+     boot_map_region(kern_pgdir, UENVS, ROUNDUP(sizeof(struct env) * NENV, PGSIZE), PADDR(envs), PTE_U);
     /*********************************************************************
      * Use the physical memory that 'bootstack' refers to as the kernel
      * stack.  The kernel stack grows down from virtual address KSTACKTOP.
